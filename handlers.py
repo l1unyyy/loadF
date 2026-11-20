@@ -5,7 +5,8 @@ import asyncio
 from aiogram.enums import ChatAction
 import logging
 import downloader
-
+import tracks_db as db
+from config import ADMIN_ID
 router = Router()
 log = logging.getLogger(__name__)
 
@@ -53,3 +54,11 @@ async def cmd_help(message : Message):
     await message.answer(f"""Список команд:
 🎵 @{me.username} название — поиск трека в любом чате
 🎶/owner — узнать владельца бота""")
+
+
+
+@router.message(Command("dbstat"))
+async def dbstat(m: Message):
+    if m.from_user.id != ADMIN_ID:
+        return await m.answer("❌ У вас нет прав администратора.")
+    await m.answer(f"Треков в базе: {db.count()}\nФайл: {db.DB_PATH}")
