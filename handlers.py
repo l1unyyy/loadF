@@ -8,4 +8,7 @@ router = Router()
 
 @router.message(CommandStart())
 async def cmd_start(message : Message):
-    await message.answer("Привет")
+    await message.answer("Для того, что бы найти трек напиши \n\n" \
+    "@loadfbot название трека")
+
+
