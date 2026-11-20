@@ -10,27 +10,28 @@ import downloader
 import tracks_db as db
 from config import ADMIN_ID, CHANNEL_ID
 
-
+STICKER_ID = "CAACAgIAAyEFAAMBC7vhFwACFtpq86crJ9DR8nnzN1PbTQwfbpmWSQACDQEAAladvQpG_UMdBUTXlz0E" 
 router = Router()
 log = logging.getLogger(__name__)
 
-
 @router.message(CommandStart())
-async def cmd_start(message : Message):
-    log.info(f" Пользователь {message.from_user.id} (@{message.from_user.username}) запустил бота")
+async def cmd_start(message: Message):
+    log.info(f"Пользователь {message.from_user.id} (@{message.from_user.username}) запустил бота")
     await message.bot.send_chat_action(
         chat_id=message.chat.id, 
         action=ChatAction.TYPING
     )
     await asyncio.sleep(0.3)
-    me = await message.bot.me()
+    me = await message.bot.me() 
+    await message.answer_sticker(STICKER_ID)
     await message.answer(f""" Привет! 👋 Добро пожаловать в музыкального бота.
+
 Что я умею:
 🎵 Напиши в любом чате @{me.username} и название трека
-💬 Или просто напиши название сюда
 📃 /help — список команд
 
 Просто напиши название песни — и я начну! 🚀""")
+    
 
 @router.message(Command("owner"))
 async def cmd_owner(message : Message):
@@ -93,4 +94,4 @@ async def new_channel_track(m: Message):
 @router.message(F.text & ~F.text.startswith('/'))
 async def handle_message_search(m: Message):
     me = await m.bot.me()
-    await m.answer(f"Поиск работает только через инлайн : \n @{me.username} название трека")
+    await m.answer(f"Поиск работает только через инлайн : \n\n @{me.username} название трека")
