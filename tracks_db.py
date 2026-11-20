@@ -9,10 +9,10 @@ con.execute("PRAGMA journal_mode=WAL")
 con.executescript("""
 CREATE TABLE IF NOT EXISTS tracks(
     id        INTEGER PRIMARY KEY,
-    uid       TEXT UNIQUE,      -- file_unique_id: один и тот же файл не добавится дважды
-    norm      TEXT UNIQUE,      -- «исполнительназвание» без символов: убирает дубли
+    uid       TEXT UNIQUE,      
+    norm      TEXT UNIQUE,      
     file_id   TEXT NOT NULL,
-    msg_id    INTEGER,          -- пост в канале (запасной вариант)
+    msg_id    INTEGER,          
     title     TEXT,
     performer TEXT,
     source    TEXT
@@ -29,9 +29,9 @@ DROP TRIGGER IF EXISTS tracks_au;
 
 TLD = r"(?:net|ru|com|org|me|su|ua|fm|cc|info|biz)"
 JUNK = [
-    re.compile(rf"\s*[\[(][^\])]*\.{TLD}[^\])]*[\])]", re.I),   # [mp3hap.net]
-    re.compile(rf"\s*\b[\w-]+\.{TLD}\s*$", re.I),                # muzofond.com в конце
-    re.compile(r"\s*[\[(]\s*без рекламы\s*[\])]", re.I),         # (без рекламы)
+    re.compile(rf"\s*[\[(][^\])]*\.{TLD}[^\])]*[\])]", re.I),   
+    re.compile(rf"\s*\b[\w-]+\.{TLD}\s*$", re.I),                
+    re.compile(r"\s*[\[(]\s*без рекламы\s*[\])]", re.I),         
     re.compile(r"<unknown>", re.I),
 ]
 
@@ -52,7 +52,6 @@ def prepare(title, performer):
 
 
 def add(uid, file_id, msg_id, title, performer, source="telegram_channel"):
-    """True, если трек новый. Дубли и пустые названия пропускаются."""
     title, performer, norm = prepare(title, performer)
     if not norm:
         return False
