@@ -76,11 +76,6 @@ def label(e):
     name = f'{e["performer"]} — {e["title"]}' if e["performer"] else e["title"]
     return ("⚡ " if e["cached"] else "") + name[:58]
 
-@router.inline_query()
-async def inline_search(q: InlineQuery):
-    rows = db.search(q.query, 50) if q.query.strip() else []
-    results = [InlineQueryResultCachedAudio(id=str(r[0]), audio_file_id=r[1]) for r in rows]
-    await q.answer(results, cache_time=30, is_personal=False)
 
 async def run_search(m: Message, query: str):
     query = query.strip()
@@ -179,6 +174,18 @@ async def pick(c: CallbackQuery):
     finally:
         await status.delete()
 
+@router.inline_query()
+async def inline_search(q: InlineQuery):
+    rows = db.search(q.query, 50) if q.query.strip() else []
+    results = [InlineQueryResultCachedAudio(id=str(r[0]), audio_file_id=r[1]) for r in rows]
+    await q.answer(results, cache_time=30, is_personal=False)
+    
+@router.channel_post(F.audio, F.chat.id == CHANNEL_ID)
+async def new_channel_track(m: Message):
+    a = m.audio
+    if db.add(a.file_unique_id, a.file_id, m.message_id, a.title, a.performer):
+        db.commit()
+    
 @router.message(F.text & ~F.text.startswith('/'))
 async def handle_message_search(m: Message):
     await run_search(m, m.text)
