@@ -173,13 +173,22 @@ async def pick(c: CallbackQuery):
         await c.message.answer("Не получилось скачать, попробуй другой трек")
     finally:
         await status.delete()
-
 @router.inline_query()
 async def inline_search(q: InlineQuery):
-    rows = db.search(q.query, 50) if q.query.strip() else []
+    if not q.query.strip():
+        return await q.answer([])
+        
+    rows = db.search(q.query, 50)
     results = [InlineQueryResultCachedAudio(id=str(r[0]), audio_file_id=r[1]) for r in rows]
-    await q.answer(results, cache_time=30, is_personal=False)
     
+    try:
+        await q.answer(results, cache_time=30, is_personal=False)
+    except TelegramBadRequest as e:
+        if "AUDIO_CONTENT_TYPE_INVALID" in str(e):
+            log.warning(f"Битый file_id в поиске по запросу: {q.query}, ids {[r[0] for r in rows]}")
+            await q.answer([], cache_time=30)
+        else:
+            raise 
 @router.channel_post(F.audio, F.chat.id == CHANNEL_ID)
 async def new_channel_track(m: Message):
     a = m.audio
