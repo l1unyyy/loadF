@@ -1,6 +1,6 @@
 .env
 __pycache__/
-.import_pos.txt
+import_pos.txt
 tracks.db
 tracks.db-shm
 tracks.db-wal

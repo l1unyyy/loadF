@@ -1,12 +1,15 @@
-from aiogram.types import Message , InlineQueryResultCachedAudio, InlineQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (Message , InlineQueryResultCachedAudio, InlineQuery, InlineKeyboardButton,
+                            InlineKeyboardMarkup, CallbackQuery, FSInputFile)
 from aiogram import Router , F
 from aiogram.filters import Command, CommandStart
 import asyncio
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.enums import ChatAction
 import logging
 import downloader
 import tracks_db as db
-from config import ADMIN_ID
+from config import ADMIN_ID, CHANNEL_ID
+import shutil
 
 
 router = Router()
@@ -83,7 +86,7 @@ async def run_search(m: Message, query: str):
     query = query.strip()
     if not query:
         return await m.answer("Напиши название трека или исполнителя 🎵")
-    wait = await m.answer("🔎 В поиске....")
+    wait = await m.answer(" В поиске....")
     local = db.search(query, 5)
     try:
         remote = await asyncio.to_thread(downloader.sc_search, query)
@@ -99,7 +102,7 @@ async def run_search(m: Message, query: str):
     for t in remote:
         
         row = db.find(t["uid"], t["title"], t["performer"])
-        if row:                                   # этот трек уже есть в базе
+        if row:                                   
             if row[0] not in seen:
                 seen.add(row[0])
                 entries.append(dict(kind="db", id=row[0], title=t["title"],
@@ -111,12 +114,70 @@ async def run_search(m: Message, query: str):
 
     await wait.delete()
     if not entries:
-        return await m.answer("Ничего не нашёл 😕. Попробуй написать иначе.")
+        return await m.answer("Ничего не нашёл . Попробуй написать иначе.")
     found[m.from_user.id] = entries
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=label(e), callback_data=f"p:{i}")]
         for i, e in enumerate(entries)])
     await m.answer("Выбери трек (⚡Придёт мгновенно):", reply_markup=kb)
+
+async def send_from_db(bot, chat_id, row_id):
+    row = db.get(row_id)
+    if not row:
+        raise RuntimeError("Tрека нет в базе")
+    file_id, msg_id = row
+    try:
+        await bot.send_audio(chat_id, file_id)
+    except TelegramBadRequest:                    
+        if not msg_id:
+            raise
+        await bot.copy_message(chat_id, CHANNEL_ID, msg_id)
+
+
+async def fetch_and_store(bot, e):
+    async with locks.setdefault(e["uid"], asyncio.Lock()):
+        row = db.find(e["uid"], e["title"], e["performer"])
+        if row:                                   
+            return row[0]
+        async with sem:
+            path, tmp = await asyncio.to_thread(downloader.download, e["url"])
+        try:
+            msg = await bot.send_audio(CHANNEL_ID, FSInputFile(path),
+                                       title=e["title"], performer=e["performer"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)     
+        db.add(e["uid"], msg.audio.file_id, msg.message_id,
+               e["title"], e["performer"], source="soundcloud")
+        db.commit()
+        row = db.find(e["uid"], e["title"], e["performer"])
+        if not row:
+            raise RuntimeError("не удалось записать трек в базу")
+        log.info(f"✅ Трек успешно скачан и сохранен в БД: {e['performer']} - {e['title']}")
+        return row[0]
+
+
+@router.callback_query(F.data.startswith("p:"))
+async def pick(c: CallbackQuery):
+    try:
+        e = found[c.from_user.id][int(c.data[2:])]
+    except (KeyError, IndexError, ValueError):
+        return await c.answer("Поиск устарел, напиши запрос ещё раз", show_alert=True)
+
+    chat_id = c.message.chat.id
+    if e["kind"] == "db":
+        await c.answer()
+        return await send_from_db(c.bot, chat_id, e["id"])
+
+    await c.answer("⏳ Качаю, пара секунд")
+    status = await c.message.answer(f'⏳ Качаю: {e["title"]}')
+    try:
+        row_id = await fetch_and_store(c.bot, e)
+        await send_from_db(c.bot, chat_id, row_id)
+    except Exception:
+        log.exception("download failed uid=%s title=%s", e["uid"], e["title"])
+        await c.message.answer("Не получилось скачать, попробуй другой трек")
+    finally:
+        await status.delete()
 
 @router.message(F.text & ~F.text.startswith('/'))
 async def handle_message_search(m: Message):
