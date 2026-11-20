@@ -9,5 +9,6 @@ TG_TOKEN_LOG = os.getenv("TG_TOKEN_LOG")
 
 if not TG_TOKEN:
     raise ValueError("BOT_TOKEN не задан в .env")
+
 if not TG_TOKEN_LOG:
     raise ValueError("BOT_TOKEN для логов не задан в .env")

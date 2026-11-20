@@ -9,7 +9,6 @@ import logging
 import downloader
 import tracks_db as db
 from config import ADMIN_ID, CHANNEL_ID
-import shutil
 
 
 router = Router()
@@ -67,112 +66,7 @@ async def dbstat(m: Message):
         return await m.answer("❌ У вас нет прав администратора.")
     await m.answer(f"Треков в базе: {db.count()}\nФайл: {db.DB_PATH}")
 
-found = {}                      
-locks = {}                      
-sem = asyncio.Semaphore(3)      
 
-
-def label(e):
-    name = f'{e["performer"]} — {e["title"]}' if e["performer"] else e["title"]
-    return ("⚡ " if e["cached"] else "") + name[:58]
-
-
-async def run_search(m: Message, query: str):
-    query = query.strip()
-    if not query:
-        return await m.answer("Напиши название трека или исполнителя 🎵")
-    wait = await m.answer(" В поиске....")
-    local = db.search(query, 5)
-    try:
-        remote = await asyncio.to_thread(downloader.sc_search, query)
-        
-    except Exception:
-        log.exception("soundcloud search failed q=%r", query)
-        remote = []
-
-    entries, seen = [], set()
-    for r in local:
-        entries.append(dict(kind="db", id=r[0], title=r[2], performer=r[3], cached=True))
-        seen.add(r[0])
-    for t in remote:
-        
-        row = db.find(t["uid"], t["title"], t["performer"])
-        if row:                                   
-            if row[0] not in seen:
-                seen.add(row[0])
-                entries.append(dict(kind="db", id=row[0], title=t["title"],
-                                    performer=t["performer"], cached=True))
-        else:
-            entries.append(dict(kind="sc", cached=False, **t))
-    entries = entries[:15]
-    log.info("search q=%r db=%d sc=%d shown=%d", query, len(local), len(remote), len(entries))
-
-    await wait.delete()
-    if not entries:
-        return await m.answer("Ничего не нашёл . Попробуй написать иначе.")
-    found[m.from_user.id] = entries
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=label(e), callback_data=f"p:{i}")]
-        for i, e in enumerate(entries)])
-    await m.answer("Выбери трек (⚡Придёт мгновенно):", reply_markup=kb)
-
-async def send_from_db(bot, chat_id, row_id):
-    row = db.get(row_id)
-    if not row:
-        raise RuntimeError("Tрека нет в базе")
-    file_id, msg_id = row
-    try:
-        await bot.send_audio(chat_id, file_id)
-    except TelegramBadRequest:                    
-        if not msg_id:
-            raise
-        await bot.copy_message(chat_id, CHANNEL_ID, msg_id)
-
-
-async def fetch_and_store(bot, e):
-    async with locks.setdefault(e["uid"], asyncio.Lock()):
-        row = db.find(e["uid"], e["title"], e["performer"])
-        if row:                                   
-            return row[0]
-        async with sem:
-            path, tmp = await asyncio.to_thread(downloader.download, e["url"])
-        try:
-            msg = await bot.send_audio(CHANNEL_ID, FSInputFile(path),
-                                       title=e["title"], performer=e["performer"])
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)     
-        db.add(e["uid"], msg.audio.file_id, msg.message_id,
-               e["title"], e["performer"], source="soundcloud")
-        db.commit()
-        row = db.find(e["uid"], e["title"], e["performer"])
-        if not row:
-            raise RuntimeError("не удалось записать трек в базу")
-        log.info(f"✅ Трек успешно скачан и сохранен в БД: {e['performer']} - {e['title']}")
-        return row[0]
-
-
-@router.callback_query(F.data.startswith("p:"))
-async def pick(c: CallbackQuery):
-    try:
-        e = found[c.from_user.id][int(c.data[2:])]
-    except (KeyError, IndexError, ValueError):
-        return await c.answer("Поиск устарел, напиши запрос ещё раз", show_alert=True)
-
-    chat_id = c.message.chat.id
-    if e["kind"] == "db":
-        await c.answer()
-        return await send_from_db(c.bot, chat_id, e["id"])
-
-    await c.answer("⏳ Качаю, пара секунд")
-    status = await c.message.answer(f'⏳ Качаю: {e["title"]}')
-    try:
-        row_id = await fetch_and_store(c.bot, e)
-        await send_from_db(c.bot, chat_id, row_id)
-    except Exception:
-        log.exception("download failed uid=%s title=%s", e["uid"], e["title"])
-        await c.message.answer("Не получилось скачать, попробуй другой трек")
-    finally:
-        await status.delete()
 @router.inline_query()
 async def inline_search(q: InlineQuery):
     if not q.query.strip():
@@ -189,6 +83,7 @@ async def inline_search(q: InlineQuery):
             await q.answer([], cache_time=30)
         else:
             raise 
+
 @router.channel_post(F.audio, F.chat.id == CHANNEL_ID)
 async def new_channel_track(m: Message):
     a = m.audio
@@ -197,4 +92,5 @@ async def new_channel_track(m: Message):
     
 @router.message(F.text & ~F.text.startswith('/'))
 async def handle_message_search(m: Message):
-    await run_search(m, m.text)
+    me = await m.bot.me()
+    await m.answer(f"Поиск работает только через инлайн : \n @{me.username} название трека")

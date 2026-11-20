@@ -19,3 +19,9 @@ class TelegramHandler(logging.Handler):
             await log_bot.send_message(ADMIN_ID, text)
         except Exception:
             pass
+
+def setup(logger):
+    h = TelegramHandler(level = logging.WARNING)
+    h.setFormatter(logging.Formatter("%(asctime)s | %(name)s | %(levelname)s | %(message)s"))
+    logger.addHandler(h)
+    
