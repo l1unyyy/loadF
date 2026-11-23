@@ -28,10 +28,15 @@ class AudioServer:
 
     async def prepare(self, uid, candidate):
         title, performer, url, source = candidate
+        queued_at = monotonic()
         async with self.download_slot:
+            started_at = monotonic()
             filename, directory = await asyncio.to_thread(downloader.download, url)
+        ready_at = monotonic()
+        log.info("MP3 %s готов: очередь %.2f с, скачивание и подготовка %.2f с",
+                 uid, started_at - queued_at, ready_at - started_at)
         path = Path(filename)
-        self.files[uid] = (path, directory, monotonic() + FILE_TTL)
+        self.files[uid] = (path, directory, ready_at + FILE_TTL)
         if not db.find(uid, title, performer):
             # Отдача MP3 может начаться, пока отдельная задача загружает его в канал.
             self.uploads[uid] = asyncio.create_task(self.publish(uid, path, candidate))
@@ -39,12 +44,16 @@ class AudioServer:
 
     async def publish(self, uid, path, candidate):
         title, performer, _, source = candidate
+        started_at = monotonic()
         try:
             message = await self.bot.send_audio(
                 CHANNEL_ID, FSInputFile(path), title=title[:64], performer=performer[:64] or None,
             )
+            uploaded_at = monotonic()
             db.add(uid, message.audio.file_id, message.message_id, title, performer, source)
             db.commit()
+            log.info("Трек %s опубликован: Telegram %.2f с, запись в SQLite %.3f с",
+                     uid, uploaded_at - started_at, monotonic() - uploaded_at)
         except Exception:
             log.exception("Не удалось сохранить трек %s в канале", uid)
         finally:

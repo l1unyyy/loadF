@@ -2,6 +2,7 @@ import glob
 import os
 import shutil
 import tempfile
+from urllib.parse import urlsplit
 
 import yt_dlp
 
@@ -45,9 +46,14 @@ def download(url):
     """Скачивает один трек и возвращает путь к MP3 и его временной папке."""
     tmp = tempfile.mkdtemp(prefix="muz_")
     try:
+        audio_format = "bestaudio/best"
+        if urlsplit(url).hostname in {"soundcloud.com", "www.soundcloud.com", "api.soundcloud.com",
+                                    "api-v2.soundcloud.com"}:
+            # Готовый MP3 по HTTPS позволяет yt-dlp обойти перекодирование.
+            audio_format = "bestaudio[ext=mp3][protocol=https]/bestaudio[ext=mp3]/bestaudio/best"
         opts = {
             "quiet": True, "no_warnings": True, "noplaylist": True, "socket_timeout": 20,
-            "format": "bestaudio/best",
+            "format": audio_format,
             "retries": 2, "fragment_retries": 2,
             "outtmpl": os.path.join(tmp, "%(id)s.%(ext)s"),
             "postprocessors": [{"key": "FFmpegExtractAudio",
