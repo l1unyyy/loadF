@@ -1,23 +1,22 @@
-from aiogram.types import (Message , InlineQueryResultCachedAudio, InlineQuery, InlineKeyboardButton,
-                            InlineKeyboardMarkup, CallbackQuery, FSInputFile , InlineQueryResultAudio)
+from aiogram.types import Message, InlineQueryResultCachedAudio, InlineQueryResultAudio, InlineQuery
+from urllib.parse import quote
 from aiogram import Router , F
 from aiogram.filters import Command, CommandStart
-from urllib.parse import quote
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.enums import ChatAction
 import logging
 import downloader
 import tracks_db as db
-from config import ADMIN_ID, CHANNEL_ID , AUDIO_BASE_URL
-from concurrent.futures import ThreadPoolExecutor
-STICKER_ID = "CAACAgQAAxkBAAIBuWsEP35nQQXHMbLV7PMYQrYkj-0LAAI1HwACWdhxUCs3-Cy46P18PQQ" 
+from config import ADMIN_ID, AUDIO_BASE_URL, CHANNEL_ID
+
+STICKER_ID = "CAACAgIAAyEFAAMBC7vhFwACFtpq86crJ9DR8nnzN1PbTQwfbpmWSQACDQEAAladvQpG_UMdBUTXlz0E" 
 router = Router()
 log = logging.getLogger(__name__)
-
-
-# Сетевой поиск ( выполняется вне цикла , пока aiogram продолжает обрабатывать запросы)
+# yt-dlp ищет в отдельном потоке, пока aiogram продолжает обрабатывать запросы.
 search_workers = ThreadPoolExecutor(max_workers=6, thread_name_prefix="music-search")
+
 
 def invalid_audio(error):
     message = str(error).upper()
@@ -28,7 +27,7 @@ def invalid_audio(error):
     ))
 
 
-async def answer_cached(q, rows):
+async def answer_results(q, rows, external):
     # Успешный ответ завершает inline-запрос. После ошибки ищем первую
     # пригодную группу и помечаем только подтверждённые одиночные ошибки.
     pending = [rows] if rows else []
@@ -37,22 +36,33 @@ async def answer_cached(q, rows):
             break
         group = pending.pop()
         try:
-            await q.answer([
+            cached = [
                 InlineQueryResultCachedAudio(id=str(row[0]), audio_file_id=row[1])
                 for row in group
-            ], cache_time=30, is_personal=False)
-            return True
+            ]
+            await q.answer(cached + external, cache_time=30, is_personal=False)
+            return
         except TelegramBadRequest as error:
             if not invalid_audio(error):
                 raise
             if len(group) == 1:
+                # Проверяем file_id без внешних результатов, прежде чем исключить его.
+                if external:
+                    try:
+                        await q.answer(cached, cache_time=0)
+                        return
+                    except TelegramBadRequest as cached_error:
+                        if not invalid_audio(cached_error):
+                            raise
                 track_id, file_id, *_ = group[0]
                 db.mark_unavailable(track_id, file_id)
                 log.warning("Telegram отклонил аудио для записи %s", track_id)
             else:
                 middle = len(group) // 2
                 pending.extend((group[middle:], group[:middle]))
-    return False
+    await q.answer(external, cache_time=30 if external else 0)
+
+
 async def search_source(source, query):
     loop = asyncio.get_running_loop()
     try:
@@ -70,6 +80,8 @@ def search_result(track):
         id=uid, audio_url=f"{AUDIO_BASE_URL}/tracks/{quote(uid, safe='')}.mp3",
         title=track["title"][:256], performer=track["performer"][:256] or None,
     )
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     log.info(f"Пользователь {message.from_user.id} (@{message.from_user.username}) запустил бота")
@@ -98,7 +110,7 @@ async def cmd_owner(message : Message):
     await asyncio.sleep(0.3)
     text = (
         "⚜️ <b>Информация о проекте.</b>\n\n"
-        "<blockquote>👤 <b>Разработчик:</b> @rheophore\n"
+        "<blockquote>👤 <b>Разработчик:</b> @kiloware\n"
         "📩 <b>Связь:</b> <a href='https://t.me/kiloware'>Написать в ЛС.</a></blockquote>"
     )
     await message.answer(text, parse_mode="HTML")
@@ -123,28 +135,33 @@ async def dbstat(m: Message):
         return await m.answer("❌ У вас нет прав администратора.")
     await m.answer(f"Треков в базе: {db.count()}\nФайл: {db.DB_PATH}")
 
+
 @router.inline_query()
 async def inline_search(q: InlineQuery):
     query = q.query.strip()
     if not any(char.isalnum() for char in query):
         return await q.answer([], cache_time=0)
 
-    if await answer_cached(q, db.search(query, 50)):
-        return
-
+    rows = db.search(query, 50)
     if not AUDIO_BASE_URL:
-        return await q.answer([], cache_time=0)
+        return await answer_results(q, rows, [])
 
-    # Если кэш не помог, запрашиваем оба источника одновременно.
+    # Даже при совпадениях в SQLite ищем новые треки в обоих источниках.
     batches = await asyncio.gather(
         search_source("soundcloud", query), search_source("youtube", query),
     )
-    tracks = {track["uid"]: track for batch in batches for track in batch
-              if db.prepare(track["title"], track["performer"])[2]}
+    cached_norms = {db.prepare(row[2], row[3])[2] for row in rows}
+    tracks = {}
+    for batch in batches:
+        for track in batch:
+            norm = db.prepare(track["title"], track["performer"])[2]
+            if norm and norm not in cached_norms:
+                tracks.setdefault(track["uid"], track)
     # HTTP-сервис находит источник по UID даже после перезапуска.
     db.save_candidates(list(tracks.values()))
-    await q.answer([search_result(track) for track in tracks.values()],
-                   cache_time=30 if tracks else 0)
+    external = [search_result(track) for track in tracks.values()]
+    await answer_results(q, rows[:50 - len(external)], external)
+
 
 @router.channel_post(F.audio, F.chat.id == CHANNEL_ID)
 async def new_channel_track(m: Message):
