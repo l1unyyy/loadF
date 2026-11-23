@@ -25,6 +25,17 @@ CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
 DROP TRIGGER IF EXISTS tracks_ai;
 DROP TRIGGER IF EXISTS tracks_ad;
 DROP TRIGGER IF EXISTS tracks_au;
+CREATE TABLE IF NOT EXISTS unavailable_audio(
+    track_id INTEGER PRIMARY KEY,
+    file_id TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS inline_candidates(
+    uid TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    performer TEXT NOT NULL,
+    url TEXT NOT NULL,
+    source TEXT NOT NULL
+);
 """)
 
 TLD = r"(?:net|ru|com|org|me|su|ua|fm|cc|info|biz)"
@@ -52,6 +63,7 @@ def prepare(title, performer):
 
 
 def add(uid, file_id, msg_id, title, performer, source="telegram_channel"):
+    """Добавляет трек или обновляет отклонённый файл. Вызывающий код делает commit."""
     title, performer, norm = prepare(title, performer)
     if not norm:
         return False
@@ -60,17 +72,56 @@ def add(uid, file_id, msg_id, title, performer, source="telegram_channel"):
         " VALUES(?,?,?,?,?,?,?)",
         (uid, norm, file_id, msg_id, title, performer, source))
     if cur.rowcount != 1:
-        return False
+        # При замене файла заголовок и rowid сохраняются, поэтому FTS обновлять не нужно.
+        repaired = con.execute(
+            "UPDATE tracks SET file_id=?, msg_id=?, source=? "
+            "WHERE id=(SELECT t.id FROM tracks t JOIN unavailable_audio b "
+            "ON b.track_id=t.id AND b.file_id=t.file_id "
+            "WHERE (t.uid=? OR t.norm=?) AND t.file_id<>? ORDER BY t.uid=? DESC LIMIT 1)",
+            (file_id, msg_id, source, uid, norm, file_id, uid),
+        )
+        return repaired.rowcount == 1
     con.execute("INSERT INTO tracks_fts(rowid, title, performer) VALUES (?,?,?)",
                 (cur.lastrowid, title, performer))
     return True
 
-
 def find(uid, title, performer):
     """Есть ли такой трек в базе (по id источника ИЛИ по «исполнитель+название»)."""
     _, _, norm = prepare(title, performer)
-    return con.execute("SELECT id, file_id, msg_id FROM tracks WHERE uid=? OR norm=?",
-                       (uid, norm)).fetchone()
+    return con.execute(
+        f"SELECT t.id, t.file_id, t.msg_id FROM tracks t "
+        f"WHERE (t.uid=? OR t.norm=?) AND {AVAILABLE} ORDER BY t.uid=? DESC LIMIT 1",
+        (uid, norm, uid),
+    ).fetchone()
+
+AVAILABLE = ("NOT EXISTS (SELECT 1 FROM unavailable_audio b "
+             "WHERE b.track_id=t.id AND b.file_id=t.file_id)")
+
+
+def mark_unavailable(track_id, file_id):
+    """Помечает конкретный file_id, если он по-прежнему привязан к записи."""
+    with con:
+        con.execute(
+            "INSERT OR REPLACE INTO unavailable_audio(track_id, file_id) "
+            "SELECT id, file_id FROM tracks WHERE id=? AND file_id=?",
+            (track_id, file_id),
+        )
+
+def save_candidates(tracks):
+    """Сохраняет ссылки источников отдельно от треков, уже загруженных в канал."""
+    with con:
+        con.executemany(
+            "INSERT INTO inline_candidates(uid,title,performer,url,source) "
+            "VALUES(:uid,:title,:performer,:url,:source) ON CONFLICT(uid) DO UPDATE SET "
+            "title=excluded.title, performer=excluded.performer, url=excluded.url",
+            tracks,
+        )
+
+def get_candidate(uid):
+    return con.execute(
+        "SELECT title, performer, url, source FROM inline_candidates WHERE uid=?",
+        (uid,),
+    ).fetchone()
 
 
 def count():
@@ -86,14 +137,15 @@ def search(q, limit=30):
     rows = con.execute(
         "SELECT t.id, t.file_id, t.title, t.performer FROM tracks_fts "
         "JOIN tracks t ON t.id = tracks_fts.rowid "
-        "WHERE tracks_fts MATCH ? ORDER BY bm25(tracks_fts) LIMIT ?",
+        f"WHERE tracks_fts MATCH ? AND {AVAILABLE} ORDER BY bm25(tracks_fts) LIMIT ?",
         (fts, limit)).fetchall()
     if rows:
         return rows
     where = " AND ".join("norm LIKE ?" for _ in toks)
     return con.execute(
-        f"SELECT id, file_id, title, performer FROM tracks WHERE {where} LIMIT ?",
+        f"SELECT id, file_id, title, performer FROM tracks t WHERE {where} AND {AVAILABLE} LIMIT ?",
         [f"%{t}%" for t in toks] + [limit]).fetchall()
+
 
 
 def get(track_id):

@@ -7,7 +7,7 @@ import logging
 from config import BOT_USERNAME
 from handlers import router
 from tg_log import setup, log_bot
-
+from audio_server import serve_audio
 
 logging.basicConfig(
     level = logging.INFO,
@@ -26,9 +26,10 @@ async def main():
     dp.startup.register(startup)
     dp.shutdown.register(shutdown)
     setup(logging.getLogger("handlers"))
+    async with bot, serve_audio(bot):
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot, close_bot_session=False)
 
-    await bot.delete_webhook(drop_pending_updates = True) 
-    await dp.start_polling(bot)
     
 
 

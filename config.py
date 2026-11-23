@@ -12,3 +12,9 @@ if not TG_TOKEN:
 
 if not TG_TOKEN_LOG:
     raise ValueError("BOT_TOKEN для логов не задан в .env")
+
+
+AUDIO_BASE_URL = os.getenv("AUDIO_BASE_URL", "").strip().rstrip("/")
+AUDIO_PORT = int(os.getenv("AUDIO_PORT", "8080"))
+if AUDIO_BASE_URL and not AUDIO_BASE_URL.startswith("https://"):
+    raise ValueError("AUDIO_BASE_URL должен начинаться с https://")
