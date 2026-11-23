@@ -9,10 +9,25 @@ import logging
 import downloader
 import tracks_db as db
 from config import ADMIN_ID, CHANNEL_ID
-
-STICKER_ID = "CAACAgIAAyEFAAMBC7vhFwACFtpq86crJ9DR8nnzN1PbTQwfbpmWSQACDQEAAladvQpG_UMdBUTXlz0E" 
+from concurrent.futures import ThreadPoolExecutor
+STICKER_ID = "CAACAgQAAxkBAAIBuWsEP35nQQXHMbLV7PMYQrYkj-0LAAI1HwACWdhxUCs3-Cy46P18PQQ" 
 router = Router()
 log = logging.getLogger(__name__)
+
+
+# Сетевой поиск ( выполняется вне цикла )
+search_workers = ThreadPoolExecutor(max_workers=6, thread_name_prefix="music-search") 
+download_slots = asyncio.Semaphore(3) 
+download_locks = [asyncio.Lock() for _ in range(64)]
+
+
+def invalid_audio(error):
+    message = str(error).upper()
+    return any(code in message for code in (
+        "AUDIO_CONTENT_TYPE_INVALID", "FILE_ID_INVALID", "WRONG_FILE_IDENTIFIER",
+        "WRONG REMOTE FILE IDENTIFIER", "FILE_REFERENCE_EXPIRED",
+        "INVALID FILE ID", "FILE_ID_EMPTY",
+    ))
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
