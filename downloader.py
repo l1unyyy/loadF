@@ -30,16 +30,19 @@ def parse_results(entries, source):
                         url=url, source=source))
     return out
 
+
 def search(source, q, n=6):
     """Ищет метаданные через yt-dlp. Аудио загружается отдельно по выбору пользователя."""
     prefix = {"soundcloud": "scsearch", "youtube": "ytsearch"}[source]
     opts = {"quiet": True, "no_warnings": True, "extract_flat": True,
-            "socket_timeout": 3, "extractor_retries": 0, "retries": 0}
+            "socket_timeout": 5, "extractor_retries": 0, "retries": 0}
     with yt_dlp.YoutubeDL(opts) as y:
         info = y.extract_info(f"{prefix}{n}:{q}", download=False)
         return parse_results(info.get("entries"), source)
-    
+
+
 def download(url):
+    """Скачивает один трек и возвращает путь к MP3 и его временной папке."""
     tmp = tempfile.mkdtemp(prefix="muz_")
     try:
         opts = {

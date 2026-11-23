@@ -16,6 +16,8 @@ router = Router()
 log = logging.getLogger(__name__)
 # yt-dlp ищет в отдельном потоке, пока aiogram продолжает обрабатывать запросы.
 search_workers = ThreadPoolExecutor(max_workers=6, thread_name_prefix="music-search")
+SEARCH_TIMEOUT = 7
+EXTERNAL_LIMIT = 12
 
 
 def invalid_audio(error):
@@ -50,6 +52,7 @@ async def answer_results(q, rows, external):
                 if external:
                     try:
                         await q.answer(cached, cache_time=0)
+                        log.info("Telegram отклонил смешанную выдачу, но принял сохранённое аудио: %s", error)
                         return
                     except TelegramBadRequest as cached_error:
                         if not invalid_audio(cached_error):
@@ -67,11 +70,13 @@ async def search_source(source, query):
     loop = asyncio.get_running_loop()
     try:
         return await asyncio.wait_for(
-            loop.run_in_executor(search_workers, downloader.search, source, query), 3.5,
+            loop.run_in_executor(search_workers, downloader.search, source, query), SEARCH_TIMEOUT,
         )
-    except Exception:
-        log.debug("Поиск %s недоступен", source, exc_info=True)
-        return []
+    except asyncio.TimeoutError:
+        log.info("Внешний поиск %s: таймаут %s с", source, SEARCH_TIMEOUT)
+    except Exception as error:
+        log.info("Внешний поиск %s: %s", source, error)
+    return []
 
 
 def search_result(track):
@@ -144,6 +149,7 @@ async def inline_search(q: InlineQuery):
 
     rows = db.search(query, 50)
     if not AUDIO_BASE_URL:
+        log.info("Внешний поиск выключен: AUDIO_BASE_URL пуст")
         return await answer_results(q, rows, [])
 
     # Даже при совпадениях в SQLite ищем новые треки в обоих источниках.
@@ -159,7 +165,19 @@ async def inline_search(q: InlineQuery):
                 tracks.setdefault(track["uid"], track)
     # HTTP-сервис находит источник по UID даже после перезапуска.
     db.save_candidates(list(tracks.values()))
-    external = [search_result(track) for track in tracks.values()]
+    if len(tracks) < EXTERNAL_LIMIT:
+        for track in db.search_candidates(query, EXTERNAL_LIMIT * 2):
+            norm = db.prepare(track["title"], track["performer"])[2]
+            if norm and norm not in cached_norms:
+                tracks.setdefault(track["uid"], track)
+            if len(tracks) >= EXTERNAL_LIMIT:
+                break
+
+    external = [search_result(track) for track in list(tracks.values())[:EXTERNAL_LIMIT]]
+    log.info(
+        "Inline-поиск: SQLite=%d, SoundCloud=%d, YouTube=%d, внешних в выдаче=%d",
+        len(rows), len(batches[0]), len(batches[1]), len(external),
+    )
     await answer_results(q, rows[:50 - len(external)], external)
 
 

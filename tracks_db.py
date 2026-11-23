@@ -5,6 +5,7 @@ import sqlite3
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracks.db")
 
 con = sqlite3.connect(DB_PATH, check_same_thread=False)
+con.create_function("casefold", 1, str.casefold, deterministic=True)
 con.execute("PRAGMA journal_mode=WAL")
 con.executescript("""
 CREATE TABLE IF NOT EXISTS tracks(
@@ -85,6 +86,7 @@ def add(uid, file_id, msg_id, title, performer, source="telegram_channel"):
                 (cur.lastrowid, title, performer))
     return True
 
+
 def find(uid, title, performer):
     """Есть ли такой трек в базе (по id источника ИЛИ по «исполнитель+название»)."""
     _, _, norm = prepare(title, performer)
@@ -93,6 +95,7 @@ def find(uid, title, performer):
         f"WHERE (t.uid=? OR t.norm=?) AND {AVAILABLE} ORDER BY t.uid=? DESC LIMIT 1",
         (uid, norm, uid),
     ).fetchone()
+
 
 AVAILABLE = ("NOT EXISTS (SELECT 1 FROM unavailable_audio b "
              "WHERE b.track_id=t.id AND b.file_id=t.file_id)")
@@ -107,6 +110,7 @@ def mark_unavailable(track_id, file_id):
             (track_id, file_id),
         )
 
+
 def save_candidates(tracks):
     """Сохраняет ссылки источников отдельно от треков, уже загруженных в канал."""
     with con:
@@ -117,11 +121,29 @@ def save_candidates(tracks):
             tracks,
         )
 
+
 def get_candidate(uid):
     return con.execute(
         "SELECT title, performer, url, source FROM inline_candidates WHERE uid=?",
         (uid,),
     ).fetchone()
+
+
+def search_candidates(query, limit=12):
+    """Ищет среди ранее найденных ссылок, в том числе по кириллице."""
+    tokens = re.findall(r"[^\W_]+", query.casefold())
+    if not tokens:
+        return []
+    criteria = " AND ".join(
+        "instr(casefold(title || ' ' || performer), ?) > 0" for _ in tokens
+    )
+    columns = ("uid", "title", "performer", "url", "source")
+    rows = con.execute(
+        f"SELECT uid, title, performer, url, source FROM inline_candidates "
+        f"WHERE {criteria} ORDER BY rowid DESC LIMIT ?",
+        (*tokens, limit),
+    )
+    return [dict(zip(columns, row)) for row in rows]
 
 
 def count():
@@ -145,7 +167,6 @@ def search(q, limit=30):
     return con.execute(
         f"SELECT id, file_id, title, performer FROM tracks t WHERE {where} AND {AVAILABLE} LIMIT ?",
         [f"%{t}%" for t in toks] + [limit]).fetchall()
-
 
 
 def get(track_id):
