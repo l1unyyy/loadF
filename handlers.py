@@ -12,12 +12,17 @@ import tracks_db as db
 from config import ADMIN_ID, AUDIO_BASE_URL, CHANNEL_ID
 
 emoji_github = "5314703247737376876"
+emoji_dev = "5818813162815753343"
+emoji_user = "5985378660343877179"
+emoji_diamond = "6012666146648495705"
 emoji_message = "5253742260054409879"
+emoji_music = "5222472119295684375"
 emoji_pods = "6021638234545592807"
 emoji_info = "5352667722092139468"
 emoji_python = "5404355553260480491"
 emoji_rocket = "5372917041193828849"
 emoji_hello = "5251678365059931202"
+
 STICKER_ID = "CAACAgQAAxkBAAIBuWsEP35nQQXHMbLV7PMYQrYkj-0LAAI1HwACWdhxUCs3-Cy46P18PQQ" 
 router = Router()
 log = logging.getLogger(__name__)
@@ -122,9 +127,9 @@ async def cmd_owner(message : Message):
         )
     await asyncio.sleep(0.3)
     text = (
-        "⚜️ <b>Информация о проекте.</b>\n\n"
-        "<blockquote>👤 <b>Разработчик:</b> @kiloware\n"
-        "📩 <b>Связь:</b> <a href='https://t.me/kiloware'>Написать в ЛС.</a></blockquote>"
+        f"<b><tg-emoji emoji-id='{emoji_diamond}' >💎</tg-emoji> Информация о проекте.</b>\n\n"
+        f"<blockquote><b><tg-emoji emoji-id='{emoji_dev}' >🧑‍💻</tg-emoji> Разработчик:</b> @kiloware\n"
+        f"<b><tg-emoji emoji-id='{emoji_message}' >✉️</tg-emoji> Связь:</b> <a href='https://t.me/kiloware'>Написать в ЛС.</a></blockquote>"
     )
     await message.answer(text, parse_mode="HTML")
 
@@ -137,10 +142,12 @@ async def cmd_help(message : Message):
         )
     await asyncio.sleep(0.3)
     me = await message.bot.me()
-    await message.answer(f"""Список команд:
-🎵 @{me.username} название — поиск трека в любом чате
-🎶/owner — узнать владельца бота""")
+    text = (
+f"Список команд:\n"
+f"<b><tg-emoji emoji-id='{emoji_music}' >🎧</tg-emoji> @{me.username} название — поиск трека в любом чате</b>\n"
+f"<b><tg-emoji emoji-id='{emoji_user}' >🧑‍💻</tg-emoji> /owner — узнать владельца бота</b>")
 
+    await message.answer(text, parse_mode = "HTML")
 
 @router.message(Command("dbstat"))
 async def dbstat(m: Message):
