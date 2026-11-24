@@ -11,7 +11,14 @@ import downloader
 import tracks_db as db
 from config import ADMIN_ID, AUDIO_BASE_URL, CHANNEL_ID
 
-STICKER_ID = "CAACAgIAAyEFAAMBC7vhFwACFtpq86crJ9DR8nnzN1PbTQwfbpmWSQACDQEAAladvQpG_UMdBUTXlz0E" 
+emoji_github = "5314703247737376876"
+emoji_message = "5253742260054409879"
+emoji_pods = "6021638234545592807"
+emoji_info = "5352667722092139468"
+emoji_python = "5404355553260480491"
+emoji_rocket = "5372917041193828849"
+emoji_hello = "5251678365059931202"
+STICKER_ID = "CAACAgQAAxkBAAIBuWsEP35nQQXHMbLV7PMYQrYkj-0LAAI1HwACWdhxUCs3-Cy46P18PQQ" 
 router = Router()
 log = logging.getLogger(__name__)
 # yt-dlp ищет в отдельном потоке, пока aiogram продолжает обрабатывать запросы.
@@ -97,14 +104,15 @@ async def cmd_start(message: Message):
     await asyncio.sleep(0.3)
     me = await message.bot.me() 
     await message.answer_sticker(STICKER_ID)
-    await message.answer(f""" Привет! 👋 Добро пожаловать в музыкального бота.
+    text = (
+f"<b>Привет! <tg-emoji emoji-id='{emoji_hello}' >✋</tg-emoji> Добро пожаловать в музыкального бота.</b>\n\n"
 
-Что я умею:
-🎵 Напиши в любом чате @{me.username} и название трека
-📃 /help — список команд
+f"Что я умею:\n"
+f"<b><tg-emoji emoji-id='{emoji_pods}' >🎧</tg-emoji> Напиши в любом чате @{me.username} и название трека</b>\n"
+f"<b><tg-emoji emoji-id='{emoji_info}' >ℹ️</tg-emoji> /help — список команд</b>\n"
 
-Просто напиши название песни — и я начну! 🚀""")
-    
+f"<b>Просто напиши название песни — и я начну!<tg-emoji emoji-id='{emoji_rocket}' >🚀</tg-emoji></b>")
+    await message.answer(text, parse_mode="HTML" , disable_web_page_preview = True )
 
 @router.message(Command("owner"))
 async def cmd_owner(message : Message):
