@@ -18,7 +18,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-
+# главная функция
 async def main():
     bot = Bot(os.getenv("TG_TOKEN"))
     dp = Dispatcher()
